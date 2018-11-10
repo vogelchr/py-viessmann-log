@@ -62,32 +62,50 @@ request_data = [
     (0x0800, 2, 'temp_outdoor', 'degC'),
     (0x0802, 2, 'temp_boiler', 'degC'),
     (0x0804, 2, 'temp_reservoir', 'degC'),
-    (0x0806, 2, 'temp_0806', 'degC'),
     (0x0808, 2, 'temp_exhaust', 'degC'),
-    (0x080a, 2, 'temp_ret', 'degC'),
+#    (0x080a, 2, 'temp_ret', 'degC'),
     (0x080c, 2, 'temp_flow', 'degC'),
     (0x080e, 2, 'temp_080e', 'degC'),
-    (0x0810, 2, 'temp_0810', 'degC'),
-    (0x0812, 2, 'temp_0812', 'degC'),
+    (0x081a, 2, 'temp_suppl', 'degC'),
 
-    (0x0843, 1, 'pump_0843', 'uint8'),  # ?
-    (0x0844, 1, 'pump_0844', 'uint8'),  # ?
+    (0x7663, 1, 'pump_a1', 'uint8'), # Heizkreispumpe A1 
+    (0x2906, 1, 'pump_a1m1', 'uint8'), # Heizkreispumpe A1M1
+    (0x3906, 1, 'pump_m2', 'uint8'), # Heizkreispumpe M2
+    (0x4906, 1, 'pump_m3', 'uint8'), # Heizkreispumpe M3
+
     (0x0845, 1, 'pump_chrg', 'uint8'),  # storage charge pump
     (0x0846, 1, 'pump_circ', 'uint8'),  # circulation pump
-    (0x0847, 1, 'pump_0847', 'uint8'),  # ?
-    (0x0848, 1, 'pump_0848', 'uint8'),  # ?
-    (0x0849, 1, 'pump_0849', 'uint8'),  # ?
+
 
     (0x0a10, 1, 'sw_0a10', 'uint8'),  # switching valve heating/hot_water/...
+
+#    (0x01d4, 2, 'temp_vl2sec', 'degC'),
+#    (0x01d8, 2, 'temp_vl3sec', 'degC'),
+
+#   (0x2900, 8, 'raw_2900', None),
+#   (0x2900, 2, 'temp_2900', 'degC'),
+#   (0x2906, 1, 'pump_2906', 'uint8'), # A1M1
+#   (0x3900, 8, 'raw_3900', None),
+#   (0x3900, 2, 'temp_3900', 'degC'),
+#   (0x3906, 1, 'pump_2906', 'uint8'), # M2
+#   (0x4900, 8, 'raw_4900', None),
+#   (0x4900, 2, 'temp_4900', 'degC'),
+#   (0x4906, 1, 'pump_2906', 'uint8'), # M3
 
     (0x5525, 2, 'temp_outdoor_lp', 'degC'),  # lowpass
     (0x5527, 2, 'temp_outdoor_sm', 'degC'),  # smooth
 
-    (0x7574, 4, 'cono', 'uint32'),  # "consomption"?
+    (0x0a90, 1, 'sw_ea1_c0', 'uint8'), # EA1: Kontakt 0
+    (0x0a91, 1, 'sw_ea1_c1', 'uint8'), # EA1: Kontakt 1
+    (0x0a92, 1, 'sw_ea1_c2', 'uint8'), # EA1: Kontakt 2
+    (0x0a95, 1, 'sw_ea1_c2', 'uint8'), # EA1: Relais 0
+
+
+#    (0x7574, 4, 'cono', 'uint32'),  # "consomption"?
 
     (0x088a, 4, 'burn_st', 'uint32'),  # starts
     (0x08a7, 4, 'burn_rt', 'uint32'),  # runtime
-    (0x0c24, 2, 'burn_flow', 'uint16'),  # flow in l/h?
+#    (0x0c24, 2, 'burn_flow', 'uint16'),  # flow in l/h?
     (0xa38f, 1, 'brn_pwr', 'uint8_half'),  # burner power in %
 ]
 
@@ -125,6 +143,7 @@ class PollMainLoop:
         while True:
             influx_fields.clear()
 
+            print('==============')
             for addr, length, tag, what in request_data:
                 ret = await poll_msg(self.vito_proto, addr, length)
                 if ret is None:
