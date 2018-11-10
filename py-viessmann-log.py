@@ -2,83 +2,153 @@
 
 import asyncio
 import struct
+import time
 
 import serial_asyncio
+from influxdb import InfluxDBClient
 
 import vitotronic
 
 
-def parse_degC(b):
-    v, = struct.unpack('<h', b)
-    return 0.1 * v
+def bcd(v):
+    hi_nibble = (v & 0xf0) >> 4
+    lo_nibble = v & 0x0f
+    return 10 * hi_nibble + lo_nibble
 
 
-def parse_uint32(b):
-    v, = struct.unpack('<L', b)
-    return v
+def viessmann_decode_systime(payload):
+    tm_year = 100 * bcd(payload[0]) + bcd(payload[1])
+    tm_mon = bcd(payload[2])
+    tm_mday = bcd(payload[3])
+    tm_wday = bcd(payload[4] - 1)
+    if tm_wday < 0:
+        tm_wday += 7
+    tm_hour = bcd(payload[5])
+    tm_min = bcd(payload[6])
+    tm_sec = bcd(payload[7])
+    tm_yday = 0
+    tm_isdst = 0
+    return tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec, tm_wday, \
+           tm_yday, tm_isdst
 
 
-def parse_uint8(b):
-    v, = struct.unpack('<B', b)
-    return v
+def parse_payload(what, payload):
+    if what == 'degC':
+        v, = struct.unpack('<h', payload)
+        return '%+6.1f', 0.1 * v
+    if what == 'uint32':
+        v, = struct.unpack('<L', payload)
+        return '%9u', v
+    if what == 'uint16':
+        v, = struct.unpack('<H', payload)
+        return '%5d', v
+    if what == 'uint8':
+        v, = struct.unpack('B', payload)
+        return '%3d', v
+    if what == 'uint8_half':
+        v, = struct.unpack('B', payload)
+        return '%3d', v * 0.5
+    if what == 'systime':
+        v = viessmann_decode_systime(payload)
+        return '%-26s', time.strftime('%A, %Y-%m-%d %H:%M:%S', v)
 
+    return '%s', vitotronic.hexlify(payload)
 
-PARSE_BYTES = ('%s', vitotronic.hexlify)
-PARSE_DEGC = ('%+6.1f', parse_degC)
-PARSE_UINT4 = ('%u', parse_uint32)
-PARSE_PCT = ('%u %%', parse_uint8)
 
 request_data = [
-    (0x00f8, 4, 'devid', PARSE_BYTES),
-    (0x0800, 2, 'outdoor', PARSE_DEGC),
-    (0x5525, 2, 'outdoor lp', PARSE_DEGC),
-    (0x5527, 2, 'outdoor smooth', PARSE_DEGC),
-    (0x0802, 2, 'boiler', PARSE_DEGC),
-    (0x0810, 2, 'boiler lp', PARSE_DEGC),
-    (0x0804, 2, 'hotwater', PARSE_DEGC),
-    (0x080C, 2, 'flow', PARSE_DEGC),
-    (0x080a, 2, 'ret', PARSE_DEGC),
-    (0x2544, 2, 'circuit', PARSE_DEGC),
-    (0x088a, 4, 'starts', PARSE_UINT4),
-    (0x08a7, 4, 'runtime', PARSE_UINT4),
-    (0x0a3c, 1, 'pwr_pump', PARSE_PCT),
-    (0xa38f, 1, 'pwr_burn', PARSE_PCT),
-    (0x0c24, 2, 'flow', PARSE_BYTES),
-    (0x0808, 2, 'exhaust', PARSE_DEGC)
+    (0x00f8, 8, 'devid', None),
+    (0x088e, 8, 'system_time', 'systime'),  # system time
+
+    (0x0800, 2, 'temp_outdoor', 'degC'),
+    (0x0802, 2, 'temp_boiler', 'degC'),
+    (0x0804, 2, 'temp_reservoir', 'degC'),
+    (0x0806, 2, 'temp_0806', 'degC'),
+    (0x0808, 2, 'temp_exhaust', 'degC'),
+    (0x080a, 2, 'temp_ret', 'degC'),
+    (0x080c, 2, 'temp_flow', 'degC'),
+    (0x080e, 2, 'temp_080e', 'degC'),
+    (0x0810, 2, 'temp_0810', 'degC'),
+    (0x0812, 2, 'temp_0812', 'degC'),
+
+    (0x0843, 1, 'pump_0843', 'uint8'),  # ?
+    (0x0844, 1, 'pump_0844', 'uint8'),  # ?
+    (0x0845, 1, 'pump_chrg', 'uint8'),  # storage charge pump
+    (0x0846, 1, 'pump_circ', 'uint8'),  # circulation pump
+    (0x0847, 1, 'pump_0847', 'uint8'),  # ?
+    (0x0848, 1, 'pump_0848', 'uint8'),  # ?
+    (0x0849, 1, 'pump_0849', 'uint8'),  # ?
+
+    (0x0a10, 1, 'sw_0a10', 'uint8'),  # switching valve heating/hot_water/...
+
+    (0x5525, 2, 'temp_outdoor_lp', 'degC'),  # lowpass
+    (0x5527, 2, 'temp_outdoor_sm', 'degC'),  # smooth
+
+    (0x7574, 4, 'cono', 'uint32'),  # "consomption"?
+
+    (0x088a, 4, 'burn_st', 'uint32'),  # starts
+    (0x08a7, 4, 'burn_rt', 'uint32'),  # runtime
+    (0x0c24, 2, 'burn_flow', 'uint16'),  # flow in l/h?
+    (0xa38f, 1, 'brn_pwr', 'uint8_half'),  # burner power in %
 ]
 
 
-class TickTimer:
-    def __init__(self, vito_proto):
-        self.vito_proto = vito_proto
-
-    async def poll_msg(self, addr, payload_len):
-        self.vito_proto.clear_rx_queue()
-        if self.vito_proto.request_read(addr, payload_len):
-            return
-        for ticks in range(10):  # wait max. 10 seconds for answer
-            await asyncio.sleep(0.1)
-            msg = self.vito_proto.pop_rx_queue()
-            if msg is None:
-                continue
-            msgtype, method, rx_addr, payload = msg
-            if msgtype == 1 and method == 1 and rx_addr == addr and len(payload) == payload_len:
-                return payload
+async def poll_msg(vito_proto, addr, length):
+    vito_proto.clear_rx_queue()
+    if vito_proto.request_read(addr, length):
         return None
+    for ticks in range(10):
+        await asyncio.sleep(0.1)
+
+        if vito_proto.rx_nak_ctr:
+            return 'NAK received.'
+        if vito_proto.rx_to_ctr:
+            return 'Timeout on RX (signalled by protocol).'
+        if vito_proto.rx_err_ctr:
+            return 'Error: Protocol error on RX.'
+        if vito_proto.rx_queue:
+            msgtype, method, address, payload = vito_proto.rx_queue.pop(0)
+            if address == addr:
+                if len(payload) != length:
+                    return 'Error: wrong length, expected %d, got %d' % (length, len(payload))
+                return msgtype, method, address, payload
+    return 'Error: Timeout waiting on answer.'
+
+
+class PollMainLoop:
+    def __init__(self, vito_proto, influxdb):
+        self.vito_proto = vito_proto
+        self.influxdb = influxdb
 
     async def tick(self):
-        while True:
-            for addr, payload_len, tag, (fmt, parser) in request_data:
+        influx_fields = dict()
 
-                payload = await self.poll_msg(addr, payload_len)
-                if payload is None:
+        while True:
+            influx_fields.clear()
+
+            for addr, length, tag, what in request_data:
+                ret = await poll_msg(self.vito_proto, addr, length)
+                if ret is None:
+                    break  # not in correct rx state, still unsynced, don't even try
+
+                if type(ret) != tuple:
+                    print('0x%04x [%d/%s]: %s' % (addr, length, what, ret))
                     continue
 
-                val = parser(payload)
-                pfmt = '%%s = %s' % fmt
-                print(pfmt % (tag, val))
+                fmt, v = parse_payload(what, ret[3])  # ret[3] == payload
+                pfmt = '%%-20s = %s' % fmt
+                print(pfmt % (tag, v))
 
-            await asyncio.sleep(5.0)
+                if type(v) == float or type(v) == int:
+                    influx_fields[tag] = v
+
+            if influx_fields:
+                js_body = [{
+                    'measurement': 'viessmann',
+                    'fields': influx_fields
+                }]
+                self.influxdb.write_points(js_body, database='heating')
+
+            await asyncio.sleep(10.0)
 
 
 def main():
@@ -105,8 +175,10 @@ def main():
         )
     )
 
-    tick_timer = TickTimer(vito_proto)
-    loop.create_task(tick_timer.tick())
+    influxdb = InfluxDBClient('localhost', 8086)
+
+    poll_mainloop = PollMainLoop(vito_proto, influxdb)
+    loop.create_task(poll_mainloop.tick())
 
     loop.run_forever()
 

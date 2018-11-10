@@ -4,7 +4,7 @@ import asyncio
 import binascii
 import logging
 
-from ascii_tbl import whatchar, ACK, NAK, EOT, ACK_i, NAK_i, ENQ_i
+from ascii_tbl import whatchar, EOT, ACK_i, NAK_i, ENQ_i
 
 SYNC_MSG = b'\x16\0\0'
 
@@ -18,28 +18,63 @@ class PrefixLoggerAdapter(logging.LoggerAdapter):
         return '%s %s' % (self.extra['prefix'], msg), kwargs
 
 
+#
+# VitoTronicProtocol State Machine
+#
+#             +--------+
+#             | Start  |
+#             +--------+
+#  Timeout:      | immediately
+#        TO      V
+#   +-------< +--------+ <----------+
+#   |         | unsync |            |
+#   +-------> +--------+ >--+       |
+#   |    tx      | rx ENQ   | rx    | rx
+#   |    EOT     V tx EOT   | NAK   | something
+#   |         +---------+   |       | else
+#   +-------< | startup |   | tx    | than
+#   |    TO   +---------+   | SYNC  | ACK, NAK or
+#   |            | rx ENQ   |       | 0x41='A'
+#   |  tx SYNC   V tx SYNC  |       |
+#   |    +--> +---------+ <-+       |
+#   |    |    | sync    | >---------+
+#   |    +--< +---------+ <>---------<> rx ACK or NAK
+#   |   TO   rx  |   ^
+#   |        $41 V   | last byte, emit message
+#   |    TO   +---------+
+#   +-------< | busy    | >----\ rx telegram byte
+#             +---------+ <----/
+#
+#
+# timeout is reset upon reception of ACK in sync state or
+# reception of message in busy state, timeout is
+# 30 seconds in sync state and 2 seconds in every other state
+
 class VitoTronicProtocol(asyncio.Protocol):
     def __init__(self):
         _log = logging.getLogger(self.__class__.__name__)
         self.log = PrefixLoggerAdapter(_log, {'prefix': self.__class__.__name__})
         self.transport = None
 
-        self.rx_state = self._rx_state_unsync
+        self.rx_state = self._rx_state_start
         self.rx_buf = bytearray()
         self.rx_timeout = 0
 
         self.rx_queue = list()
         self.rx_ack_ctr = 0
         self.rx_nak_ctr = 0
+        self.rx_to_ctr = 0
+        self.rx_err_ctr = 0
+        self.rx_msg_ctr = 0
 
     ###
     # state handler
     ###
 
+    def _rx_state_start(self, c):
+        pass # dummy
+
     def _rx_state_unsync(self, c):
-        if c is None:  # timeout
-            self.transport.write(EOT)
-            return
         if c == NAK_i:
             self.log.debug('Received NAK, sending sync sequence.')
             self.transport.write(SYNC_MSG)
@@ -50,24 +85,19 @@ class VitoTronicProtocol(asyncio.Protocol):
             return self._rx_state_startup
         else:
             self.log.warning('Received %s while unsynced.', whatchar(c))
+            self.rx_err_ctr += 1
 
     def _rx_state_startup(self, c):
-        if c is None:  # timeout
-            return self._rx_state_unsync
-
         if c == ENQ_i:
             self.log.debug('Received ENQ, sending sync sequence.')
             self.transport.write(SYNC_MSG)
             return self._rx_state_sync
         else:
             self.log.warning('Unexpected %s in sync start.', whatchar(c))
+            self.rx_err_ctr += 1
             return self._rx_state_unsync
 
     def _rx_state_sync(self, c):
-        if c is None:
-            self.transport.write(SYNC_MSG)
-            return
-
         ###
         # not having received any message, we might receive
         # an ACK, NAK/ERROR, ENQ or start of telegram
@@ -78,18 +108,17 @@ class VitoTronicProtocol(asyncio.Protocol):
             else:
                 self.rx_nak_ctr += 1
             self.log.debug('Received %s.', whatchar(c))
+            self.rx_timeout = 0
         elif c == 0x41:  # start of newly received packet
             self.rx_buf.clear()
             self.rx_buf.append(c)
             return self._rx_state_busy
         else:
             self.log.warning('Unexpected %s received.', whatchar(c))
+            self.rx_err_ctr += 1
             return self._rx_state_unsync
 
     def _rx_state_busy(self, c):
-        if c is None:  # timeout should not happen here
-            return self._rx_state_unsync
-
         self.rx_buf.append(c)
 
         if len(self.rx_buf) == 0 or len(self.rx_buf) < self.rx_buf[1] + 3:
@@ -113,10 +142,10 @@ class VitoTronicProtocol(asyncio.Protocol):
 
         if chksum != self.rx_buf[-1]:
             self.log.error('Bad checksum: %s', telegram_ascii)
-            self.transport.write(NAK)
+            self.rx_err_ctr += 1
         elif len(self.rx_buf) != self.rx_buf[6] + 8:
             self.log.error('Bad payload length: %s', telegram_ascii)
-            self.transport.write(NAK)
+            self.rx_err_ctr += 1
         else:
 
             msgtype = self.rx_buf[2]
@@ -128,6 +157,9 @@ class VitoTronicProtocol(asyncio.Protocol):
                            msgtype, method, address, hexlify(payload))
             self.rx_queue.append((msgtype, method, address, payload))
 
+            self.rx_msg_ctr += 1
+
+        self.rx_timeout = 0
         return self._rx_state_sync
 
     ###
@@ -144,14 +176,17 @@ class VitoTronicProtocol(asyncio.Protocol):
         self.log.info('Connection lost.')
 
     def data_received(self, data):
+        # upon start, we might have a lot of junk in the
+        # stale RX buffer of the serial interface
+        if self.rx_state == self._rx_state_start :
+            self.rx_state = self._rx_state_unsync
+            if len(data) > 1 :
+                return
+
         for d in data:
             new_state = self.rx_state(d)
             if new_state:
                 self.rx_state = new_state
-            if self.rx_state == self._rx_state_sync:
-                self.rx_timeout = 100  # timeout 10s
-            else:
-                self.rx_timeout = 20  # 2s
 
     def eof_received(self):
         self.log.info('EOF received!')
@@ -161,25 +196,32 @@ class VitoTronicProtocol(asyncio.Protocol):
     # task to handle our timeouts
     ###
     async def tick(self):
-        print('Tick')
         while True:
-            if self.rx_timeout == 0:
-                self.rx_state(None)  # timeout
-                if self.rx_state == self._rx_state_sync:
-                    self.rx_timeout = 100
-                else:
-                    self.rx_timeout = 20
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
+
+            if self.rx_state == self._rx_state_sync:
+                if self.rx_timeout >= 60:  # 30sec
+                    self.transport.write(SYNC_MSG)
+                    self.rx_timeout = 0
+                continue
+
+            if self.rx_timeout >= 8: # 4 sec
+                self.log.error('RX Timeout in state %s.', self.rx_state.__name__)
+                self.rx_to_ctr += 1
+                self.rx_state = self._rx_state_unsync
+                self.transport.write(EOT)
+                self.rx_timeout = 0
+                continue
+
+            self.rx_timeout += 1
 
     def clear_rx_queue(self):
         self.rx_ack_ctr = 0
         self.rx_nak_ctr = 0
+        self.rx_err_ctr = 0
+        self.rx_msg_ctr = 0
+        self.rx_to_ctr = 0
         self.rx_queue.clear()
-
-    def pop_rx_queue(self):
-        if self.rx_queue:
-            return self.rx_queue.pop(0)
-        return None
 
     def request_read(self, addr, exp_len):
         if self.rx_state != self._rx_state_sync:
@@ -187,6 +229,7 @@ class VitoTronicProtocol(asyncio.Protocol):
                 self.log.error('request_read() in state %s', self.rx_state.__name__)
             else:
                 self.log.error('request_read() during startup!')
+            return True
 
         self.log.debug('Requesting data at address 0x%04x, len %d.', addr, exp_len)
         msg = bytearray(8)
@@ -200,3 +243,4 @@ class VitoTronicProtocol(asyncio.Protocol):
         msg[7] = sum(msg[1:-1]) & 0xff
 
         self.transport.write(msg)
+        return False
