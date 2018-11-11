@@ -167,13 +167,12 @@ class VitoTronicProtocol(asyncio.Protocol):
     ###
     def connection_made(self, transport):
         self.log.extra['prefix'] = transport._serial.port
-        self.log.info('Connection made.')
         self.transport = transport
         self.transport._loop.create_task(self.tick())
         self.transport.write(EOT)
 
     def connection_lost(self, exc):
-        self.log.info('Connection lost.')
+        pass # should not happen with serial port
 
     def data_received(self, data):
         # upon start, we might have a lot of junk in the
@@ -189,7 +188,6 @@ class VitoTronicProtocol(asyncio.Protocol):
                 self.rx_state = new_state
 
     def eof_received(self):
-        self.log.info('EOF received!')
         return False  # should close the transport
 
     ###

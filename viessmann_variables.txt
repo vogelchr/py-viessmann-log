@@ -1,0 +1,24 @@
+# source for information:
+#    [PDF] 20CB_Vitotronic_200_Typ_HO1ABC
+#
+#  save to  \
+#  influxdb? \        datatype
+#            |        or length
+# name       v addr   if raw bytes  # comments
+# ----------:-:------:---------:----------------------------------
+device_id    y 0x00f8 4
+system_time  - 0x088E systime
+t_outdoor    y 0x0800 degC    # [rb]
+t_outdoor_lp y 0x5525 degC    # [PDF] Aktuell berechnete Tiefpass-Aussentemperatur, Zeitkonstante 30 Minuten.
+t_outdoor_sm y 0x5527 degC    # [rb]  Aussentemperature "smooothed" ?
+t_boiler     y 0x0810 degC    # [PDF] Kesseltemperatur
+t_supply     y 0x081a degC    # [PDF] Gem. Vorlauftemperatur
+p_burner     y 0xa38f uint8h  # [rb]  burner power in %
+t_set_m2     y 0x3544 degC    # [PDF] Vorlauftemperatur M2 Soll
+t_set_m3     y 0x4544 degC    # [PDF] Vorlauftemperatur M3 Soll
+t_supply_m2  y 0x3900 degC    # [PDF] Vorlauftemperatur M2
+t_supply_m3  y 0x4900 degC    # [PDF] Vorlauftemperatur M2
+t_exhaust    y 0x808  degC    # [rb]  exhauts gaz temp
+pump_m2      y 0x3906 uint8
+pump_m3      y 0x4906 uint8
+t_reservoir  y 0x0812 degC    # [PDF] Speicher Ladesensor Komfortsensor

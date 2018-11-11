@@ -1,115 +1,16 @@
 #!/usr/bin/python
 
 import asyncio
-import struct
-import time
 import logging
 
 import serial_asyncio
 from aiohttp import web
-from influxdb import InfluxDBClient
 
+import viessmann_decode
 import vitotronic
 
 log = logging.getLogger('py-viessmann-log')
 
-def bcd(v):
-    hi_nibble = (v & 0xf0) >> 4
-    lo_nibble = v & 0x0f
-    return 10 * hi_nibble + lo_nibble
-
-
-def viessmann_decode_systime(payload):
-    tm_year = 100 * bcd(payload[0]) + bcd(payload[1])
-    tm_mon = bcd(payload[2])
-    tm_mday = bcd(payload[3])
-    tm_wday = bcd(payload[4] - 1)
-    if tm_wday < 0:
-        tm_wday += 7
-    tm_hour = bcd(payload[5])
-    tm_min = bcd(payload[6])
-    tm_sec = bcd(payload[7])
-    tm_yday = 0
-    tm_isdst = 0
-    return tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec, tm_wday, \
-           tm_yday, tm_isdst
-
-
-def parse_payload(what, payload):
-    if what == 'degC':
-        v, = struct.unpack('<h', payload)
-        return '%+6.1f', 0.1 * v
-    if what == 'uint32':
-        v, = struct.unpack('<L', payload)
-        return '%9u', v
-    if what == 'uint16':
-        v, = struct.unpack('<H', payload)
-        return '%5d', v
-    if what == 'uint8':
-        v, = struct.unpack('B', payload)
-        return '%3d', v
-    if what == 'uint8_half':
-        v, = struct.unpack('B', payload)
-        return '%3d', v * 0.5
-    if what == 'systime':
-        v = viessmann_decode_systime(payload)
-        return '%-26s', time.strftime('%A, %Y-%m-%d %H:%M:%S', v)
-
-    return '%s', vitotronic.hexlify(payload)
-
-
-request_data = [
-    (0x00f8, 8, 'devid', None),
-    (0x088e, 8, 'system_time', 'systime'),  # system time
-
-    (0x0800, 2, 'temp_outdoor', 'degC'),
-    (0x0802, 2, 'temp_boiler', 'degC'),
-    (0x0804, 2, 'temp_reservoir', 'degC'),
-    (0x0808, 2, 'temp_exhaust', 'degC'),
-    #    (0x080a, 2, 'temp_ret', 'degC'),
-    (0x080c, 2, 'temp_flow', 'degC'),
-    (0x080e, 2, 'temp_080e', 'degC'),
-    (0x081a, 2, 'temp_suppl', 'degC'),
-    (0x7663, 1, 'pump_a1', 'uint8'),  # Heizkreispumpe A1
-    (0x2906, 1, 'pump_a1m1', 'uint8'),  # Heizkreispumpe A1M1
-    (0x3906, 1, 'pump_m2', 'uint8'),  # Heizkreispumpe M2
-    (0x4906, 1, 'pump_m3', 'uint8'),  # Heizkreispumpe M3
-
-    (0x0845, 1, 'pump_chrg', 'uint8'),  # storage charge pump
-    (0x0846, 1, 'pump_circ', 'uint8'),  # circulation pump
-
-
-    (0x0a10, 1, 'sw_0a10', 'uint8'),  # switching valve heating/hot_water/...
-
-    #    (0x01d4, 2, 'temp_vl2sec', 'degC'),
-    #    (0x01d8, 2, 'temp_vl3sec', 'degC'),
-
-    #   (0x2900, 8, 'raw_2900', None),
-    #   (0x2900, 2, 'temp_2900', 'degC'),
-    #   (0x2906, 1, 'pump_2906', 'uint8'), # A1M1
-    #   (0x3900, 8, 'raw_3900', None),
-    #   (0x3900, 2, 'temp_3900', 'degC'),
-    #   (0x3906, 1, 'pump_2906', 'uint8'), # M2
-    #   (0x4900, 8, 'raw_4900', None),
-    #   (0x4900, 2, 'temp_4900', 'degC'),
-    #   (0x4906, 1, 'pump_2906', 'uint8'), # M3
-
-    (0x5525, 2, 'temp_outdoor_lp', 'degC'),  # lowpass
-    (0x5527, 2, 'temp_outdoor_sm', 'degC'),  # smooth
-
-    (0x0a90, 1, 'sw_ea1_c0', 'uint8'),  # EA1: Kontakt 0
-    (0x0a91, 1, 'sw_ea1_c1', 'uint8'),  # EA1: Kontakt 1
-    (0x0a92, 1, 'sw_ea1_c2', 'uint8'),  # EA1: Kontakt 2
-    (0x0a95, 1, 'sw_ea1_c2', 'uint8'),  # EA1: Relais 0
-
-
-    #    (0x7574, 4, 'cono', 'uint32'),  # "consomption"?
-
-    (0x088a, 4, 'burn_st', 'uint32'),  # starts
-    (0x08a7, 4, 'burn_rt', 'uint32'),  # runtime
-    #    (0x0c24, 2, 'burn_flow', 'uint16'),  # flow in l/h?
-    (0xa38f, 1, 'brn_pwr', 'uint8_half'),  # burner power in %
-]
 
 async def poll_msg(vito_proto, addr, length):
     vito_proto.clear_rx_queue()
@@ -125,92 +26,157 @@ async def poll_msg(vito_proto, addr, length):
         if vito_proto.rx_err_ctr:
             return 'Error: Protocol error on RX.'
         if vito_proto.rx_queue:
-            msgtype, method, address, payload = vito_proto.rx_queue.pop(0)
-            if address == addr:
+            msgtype, method, rx_addr, payload = vito_proto.rx_queue.pop(0)
+            if rx_addr == addr:
                 if len(payload) != length:
                     return 'Error: wrong length, expected %d, got %d' % (length, len(payload))
-                return msgtype, method, address, payload
+                return msgtype, method, rx_addr, payload
+            else:
+                return 'Error: wrong address, expected %d, got %d' % (addr, rx_addr)
     return 'Error: Timeout waiting on answer.'
 
 
 class PollMainLoop:
-    def __init__(self, vito_proto, influxdb):
+    def __init__(self, vito_proto, influx_client, varlist, args):
         self.vito_proto = vito_proto
-        self.influxdb = influxdb
-        self.busy = asyncio.Lock()
+        self.influx_client = influx_client
+        self.varlist = varlist
+        self.args = args
+
+        self.vito_lock = asyncio.Lock()
 
     async def handle_web_query(self, request):
         try:
-            addr = int(request.match_info['addr'],16)
-            length = int(request.match_info['length'])
-            if addr < 0 or addr > 0xffff :
+            addr = int(request.match_info['addr'], 16)
+            if addr < 0 or addr > 0xffff:
                 raise RuntimeError('address not in range 0000 .. ffff')
-            if length < 0 or length > 16 :
-                raise RuntimeError('length not in range 0..16')
+
+            tag_or_len = request.match_info['tag_or_len']
+            length, decode_fct, fmt = viessmann_decode.gen_decoder(tag_or_len)
         except Exception as e:
-            return web.Response(status=500, text='Exception while parsing URL:' + str(e))
+            log.error('Exception while parsing URL, match_info=%s',
+                      request.match_info, exc_info=True)
+            return web.Response(status=500, text='Exception while parsing URL.')
 
-        async with self.busy:
+        async with self.vito_lock:
             ret = await poll_msg(self.vito_proto, addr, length)
-
-        cmd, method, addr, payload = ret
 
         if ret is None:
             return web.Response(status=500, text='Serial port not ready.')
-        return web.Response(status=200, text=vitotronic.hexlify(payload))
+
+        if type(ret) != tuple:  # error message
+            return web.Response(status=500, text=ret)
+
+        # unpack result, format return string to user
+        try:
+            cmd, method, addr, payload = ret
+            pl_fmt = fmt % decode_fct(payload)
+            text = '%04x/%d = %s\n' % (addr, length, pl_fmt)
+        except Exception as e:
+            log.error('Exception while formatting result.', exc_info=True)
+            return web.Response(status=500, text='Exception while formatting result.')
+
+        return web.Response(status=200, text=fmt % decode_fct(payload))
+
+    async def perform_regular_query(self):
+        influx_fields = dict()
+
+        for item in self.varlist:
+            async with self.vito_lock:
+                ret = await poll_msg(self.vito_proto, item.addr, item.length)
+            if ret is None:
+                log.info('Controller is not ready. Skipping.')
+                break  # not in correct rx state, still unsynced, don't even try
+
+            if type(ret) != tuple:
+                log.error('%s [%04x/%d] error %s while talking to controller',
+                          item.name, item.addr, item.length)
+                continue
+
+            msgtype, method, rx_addr, payload = ret
+
+            try:
+                v = item.decoder(payload)
+            except Exception as e:
+                log.error('%-12s ERR, raw=%s, exception=%s', item.name, vitotronic.hexlify(payload), e)
+
+            log.info('%-12s ' + item.format, item.name, v)
+
+            if item.to_influxdb:
+                influx_fields[item.name] = v
+        return influx_fields
 
     async def tick(self):
         influx_fields = dict()
 
         while True:
+            log.info('=== Poll controller ===')
+            influx_fields = await self.perform_regular_query()
+            if influx_fields and self.influx_client:
+                js_body = [{
+                    'measurement': self.args.measurement,
+                    'fields': influx_fields
+                }]
+                self.influx_client.write_points(js_body, database=self.args.influxdb)
 
-            async with self.busy:
-                influx_fields.clear()
-
-                print('==============')
-                for addr, length, tag, what in request_data:
-                    ret = await poll_msg(self.vito_proto, addr, length)
-                    if ret is None:
-                        break  # not in correct rx state, still unsynced, don't even try
-
-                    if type(ret) != tuple:
-                        print('0x%04x [%d/%s]: %s' % (addr, length, what, ret))
-                        continue
-
-                    fmt, v = parse_payload(what, ret[3])  # ret[3] == payload
-                    pfmt = f'%04x %-16s %-20s = {fmt}'
-                    print(pfmt % (addr, vitotronic.hexlify(ret[3]), tag, v))
-
-                    if type(v) == float or type(v) == int:
-                        influx_fields[tag] = v
-
-                if influx_fields:
-                    js_body = [{
-                        'measurement': 'viessmann',
-                        'fields': influx_fields
-                    }]
-                    self.influxdb.write_points(js_body, database='heating')
-            # end with busy lock
-            await asyncio.sleep(10.0)
+            await asyncio.sleep(self.args.sleep)
 
 
 def main():
     import argparse
-    import logging
 
+    ###
+    # parse command-line arguments
+    ###
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--debug', help='Debug mode.', action='store_true')
+    parser.add_argument('-q', '--quiet', help='Quiet mode, less output.', action='store_true')
 
     parser.add_argument('-t', '--tty', metavar='DEV', default='/dev/ttyUSB0',
                         help='Serial port, [def: /dev/ttyUSB0]', )
 
+    parser.add_argument('-s', '--sleep', metavar='SEC', default=15, type=int,
+                        help='Time to sleep between queries.')
+
+    grp = parser.add_argument_group('InfluxDB Related')
+    grp.add_argument('-i', '--influxdb', metavar='DBNAME', default=None, type=str,
+                     help='Influxdb database to use [def: None, inactive]')
+    grp.add_argument('-m', '--measurement', metavar='MEASNAME', default='optolink',
+                     help='Influxdb measurement name to use [def: optolink]')
+    grp.add_argument('-a', '--influx-server', metavar='HOST', default='127.0.0.1',
+                     help='Influxdb server address [def: 127.0.0.1]')
+    grp.add_argument('-p', '--influx-port', metavar='PORT', default=8086, type=int,
+                     help='Influxdb server port [def: 8086]')
+
+    grp.add_argument('-w', '--webserver', metavar='PORT', default=None, type=int,
+                     help='''Run webserver to submit queries on
+http://localhost:PORT/query/address/length_or_tag where length may be one
+of the allowed data types (e.g. degC, uint8, ...) or number of bytes to read.
+[def: off]''')
+
+    parser.add_argument('variablelist',
+                        help='''File with variables to query regularly.''')
+
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format='%(asctime)-15s %(message)s')
+    lvl = logging.INFO
+    if args.quiet:
+        lvl = logging.WARNING
+    if args.debug:
+        lvl = logging.DEBUG
+
+    logging.basicConfig(level=lvl, format='%(asctime)-15s %(message)s')
 
     loop = asyncio.get_event_loop()
 
+    ###
+    # read list of measurements
+    ###
+    variablelist = viessmann_decode.load_variable_list(args.variablelist)
+
+    ###
+    # serial interface
+    ###
     vito_transp, vito_proto = loop.run_until_complete(
         serial_asyncio.create_serial_connection(
             loop, vitotronic.VitoTronicProtocol, '/dev/ttyUSB0',
@@ -218,17 +184,26 @@ def main():
         )
     )
 
-    influxdb = InfluxDBClient('localhost', 8086)
+    ###
+    # influxdb
+    ###
+    influx_client = None
+    if args.influxdb:
+        from influxdb import InfluxDBClient
+        influx_client = InfluxDBClient(args.influx_server, args.influx_port)
 
-    poll_mainloop = PollMainLoop(vito_proto, influxdb)
+    poll_mainloop = PollMainLoop(vito_proto, influx_client, variablelist, args)
     loop.create_task(poll_mainloop.tick())
 
-    webapp = web.Application()
-    webapp.add_routes([
-        web.get('/query/{addr}/{length}', poll_mainloop.handle_web_query),
-    ])
+    if args.webserver :
+        webapp = web.Application()
+        webapp.add_routes([
+            web.get('/query/{addr}/{tag_or_len}', poll_mainloop.handle_web_query),
+        ])
 
-    web.run_app(webapp)  # includes loop.run_forever()
+        web.run_app(webapp, port=args.webserver)  # includes loop.run_forever()
+    else :
+        loop.run_forever()
 
 
 if __name__ == '__main__':
