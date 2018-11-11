@@ -3,12 +3,15 @@
 import asyncio
 import struct
 import time
+import logging
 
 import serial_asyncio
+from aiohttp import web
 from influxdb import InfluxDBClient
 
 import vitotronic
 
+log = logging.getLogger('py-viessmann-log')
 
 def bcd(v):
     hi_nibble = (v & 0xf0) >> 4
@@ -63,15 +66,14 @@ request_data = [
     (0x0802, 2, 'temp_boiler', 'degC'),
     (0x0804, 2, 'temp_reservoir', 'degC'),
     (0x0808, 2, 'temp_exhaust', 'degC'),
-#    (0x080a, 2, 'temp_ret', 'degC'),
+    #    (0x080a, 2, 'temp_ret', 'degC'),
     (0x080c, 2, 'temp_flow', 'degC'),
     (0x080e, 2, 'temp_080e', 'degC'),
     (0x081a, 2, 'temp_suppl', 'degC'),
-
-    (0x7663, 1, 'pump_a1', 'uint8'), # Heizkreispumpe A1 
-    (0x2906, 1, 'pump_a1m1', 'uint8'), # Heizkreispumpe A1M1
-    (0x3906, 1, 'pump_m2', 'uint8'), # Heizkreispumpe M2
-    (0x4906, 1, 'pump_m3', 'uint8'), # Heizkreispumpe M3
+    (0x7663, 1, 'pump_a1', 'uint8'),  # Heizkreispumpe A1
+    (0x2906, 1, 'pump_a1m1', 'uint8'),  # Heizkreispumpe A1M1
+    (0x3906, 1, 'pump_m2', 'uint8'),  # Heizkreispumpe M2
+    (0x4906, 1, 'pump_m3', 'uint8'),  # Heizkreispumpe M3
 
     (0x0845, 1, 'pump_chrg', 'uint8'),  # storage charge pump
     (0x0846, 1, 'pump_circ', 'uint8'),  # circulation pump
@@ -79,36 +81,35 @@ request_data = [
 
     (0x0a10, 1, 'sw_0a10', 'uint8'),  # switching valve heating/hot_water/...
 
-#    (0x01d4, 2, 'temp_vl2sec', 'degC'),
-#    (0x01d8, 2, 'temp_vl3sec', 'degC'),
+    #    (0x01d4, 2, 'temp_vl2sec', 'degC'),
+    #    (0x01d8, 2, 'temp_vl3sec', 'degC'),
 
-#   (0x2900, 8, 'raw_2900', None),
-#   (0x2900, 2, 'temp_2900', 'degC'),
-#   (0x2906, 1, 'pump_2906', 'uint8'), # A1M1
-#   (0x3900, 8, 'raw_3900', None),
-#   (0x3900, 2, 'temp_3900', 'degC'),
-#   (0x3906, 1, 'pump_2906', 'uint8'), # M2
-#   (0x4900, 8, 'raw_4900', None),
-#   (0x4900, 2, 'temp_4900', 'degC'),
-#   (0x4906, 1, 'pump_2906', 'uint8'), # M3
+    #   (0x2900, 8, 'raw_2900', None),
+    #   (0x2900, 2, 'temp_2900', 'degC'),
+    #   (0x2906, 1, 'pump_2906', 'uint8'), # A1M1
+    #   (0x3900, 8, 'raw_3900', None),
+    #   (0x3900, 2, 'temp_3900', 'degC'),
+    #   (0x3906, 1, 'pump_2906', 'uint8'), # M2
+    #   (0x4900, 8, 'raw_4900', None),
+    #   (0x4900, 2, 'temp_4900', 'degC'),
+    #   (0x4906, 1, 'pump_2906', 'uint8'), # M3
 
     (0x5525, 2, 'temp_outdoor_lp', 'degC'),  # lowpass
     (0x5527, 2, 'temp_outdoor_sm', 'degC'),  # smooth
 
-    (0x0a90, 1, 'sw_ea1_c0', 'uint8'), # EA1: Kontakt 0
-    (0x0a91, 1, 'sw_ea1_c1', 'uint8'), # EA1: Kontakt 1
-    (0x0a92, 1, 'sw_ea1_c2', 'uint8'), # EA1: Kontakt 2
-    (0x0a95, 1, 'sw_ea1_c2', 'uint8'), # EA1: Relais 0
+    (0x0a90, 1, 'sw_ea1_c0', 'uint8'),  # EA1: Kontakt 0
+    (0x0a91, 1, 'sw_ea1_c1', 'uint8'),  # EA1: Kontakt 1
+    (0x0a92, 1, 'sw_ea1_c2', 'uint8'),  # EA1: Kontakt 2
+    (0x0a95, 1, 'sw_ea1_c2', 'uint8'),  # EA1: Relais 0
 
 
-#    (0x7574, 4, 'cono', 'uint32'),  # "consomption"?
+    #    (0x7574, 4, 'cono', 'uint32'),  # "consomption"?
 
     (0x088a, 4, 'burn_st', 'uint32'),  # starts
     (0x08a7, 4, 'burn_rt', 'uint32'),  # runtime
-#    (0x0c24, 2, 'burn_flow', 'uint16'),  # flow in l/h?
+    #    (0x0c24, 2, 'burn_flow', 'uint16'),  # flow in l/h?
     (0xa38f, 1, 'brn_pwr', 'uint8_half'),  # burner power in %
 ]
-
 
 async def poll_msg(vito_proto, addr, length):
     vito_proto.clear_rx_queue()
@@ -136,37 +137,60 @@ class PollMainLoop:
     def __init__(self, vito_proto, influxdb):
         self.vito_proto = vito_proto
         self.influxdb = influxdb
+        self.busy = asyncio.Lock()
+
+    async def handle_web_query(self, request):
+        try:
+            addr = int(request.match_info['addr'],16)
+            length = int(request.match_info['length'])
+            if addr < 0 or addr > 0xffff :
+                raise RuntimeError('address not in range 0000 .. ffff')
+            if length < 0 or length > 16 :
+                raise RuntimeError('length not in range 0..16')
+        except Exception as e:
+            return web.Response(status=500, text='Exception while parsing URL:' + str(e))
+
+        async with self.busy:
+            ret = await poll_msg(self.vito_proto, addr, length)
+
+        cmd, method, addr, payload = ret
+
+        if ret is None:
+            return web.Response(status=500, text='Serial port not ready.')
+        return web.Response(status=200, text=vitotronic.hexlify(payload))
 
     async def tick(self):
         influx_fields = dict()
 
         while True:
-            influx_fields.clear()
 
-            print('==============')
-            for addr, length, tag, what in request_data:
-                ret = await poll_msg(self.vito_proto, addr, length)
-                if ret is None:
-                    break  # not in correct rx state, still unsynced, don't even try
+            async with self.busy:
+                influx_fields.clear()
 
-                if type(ret) != tuple:
-                    print('0x%04x [%d/%s]: %s' % (addr, length, what, ret))
-                    continue
+                print('==============')
+                for addr, length, tag, what in request_data:
+                    ret = await poll_msg(self.vito_proto, addr, length)
+                    if ret is None:
+                        break  # not in correct rx state, still unsynced, don't even try
 
-                fmt, v = parse_payload(what, ret[3])  # ret[3] == payload
-                pfmt = '%%-20s = %s' % fmt
-                print(pfmt % (tag, v))
+                    if type(ret) != tuple:
+                        print('0x%04x [%d/%s]: %s' % (addr, length, what, ret))
+                        continue
 
-                if type(v) == float or type(v) == int:
-                    influx_fields[tag] = v
+                    fmt, v = parse_payload(what, ret[3])  # ret[3] == payload
+                    pfmt = f'%04x %-16s %-20s = {fmt}'
+                    print(pfmt % (addr, vitotronic.hexlify(ret[3]), tag, v))
 
-            if influx_fields:
-                js_body = [{
-                    'measurement': 'viessmann',
-                    'fields': influx_fields
-                }]
-                self.influxdb.write_points(js_body, database='heating')
+                    if type(v) == float or type(v) == int:
+                        influx_fields[tag] = v
 
+                if influx_fields:
+                    js_body = [{
+                        'measurement': 'viessmann',
+                        'fields': influx_fields
+                    }]
+                    self.influxdb.write_points(js_body, database='heating')
+            # end with busy lock
             await asyncio.sleep(10.0)
 
 
@@ -199,7 +223,12 @@ def main():
     poll_mainloop = PollMainLoop(vito_proto, influxdb)
     loop.create_task(poll_mainloop.tick())
 
-    loop.run_forever()
+    webapp = web.Application()
+    webapp.add_routes([
+        web.get('/query/{addr}/{length}', poll_mainloop.handle_web_query),
+    ])
+
+    web.run_app(webapp)  # includes loop.run_forever()
 
 
 if __name__ == '__main__':
