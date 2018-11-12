@@ -76,7 +76,7 @@ class PollMainLoop:
             log.error('Exception while formatting result.', exc_info=True)
             return web.Response(status=500, text='Exception while formatting result.')
 
-        return web.Response(status=200, text=fmt % decode_fct(payload))
+        return web.Response(status=200, text=text)
 
     async def perform_regular_query(self):
         influx_fields = dict()
@@ -117,7 +117,10 @@ class PollMainLoop:
                     'measurement': self.args.measurement,
                     'fields': influx_fields
                 }]
-                self.influx_client.write_points(js_body, database=self.args.influxdb)
+                try :
+                    self.influx_client.write_points(js_body, database=self.args.influxdb)
+                except Exception as e :
+                    log.error('Error writing to influxdb!', exc_info=True)
 
             await asyncio.sleep(self.args.sleep)
 
