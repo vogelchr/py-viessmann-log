@@ -1,5 +1,6 @@
 # source for information:
 #    [PDF] 20CB_Vitotronic_200_Typ_HO1ABC
+#    [kd2] KD_Lst_Nr2_20110719
 #    [rb]  from https://gist.github.com/mqu/9519e39ccc474f111ffb
 #          an implementation of the protocol in Ruby by Marc Quinton
 #
@@ -25,3 +26,21 @@ pump_m2      y 0x3906 uint8   # [PDF] Heizkreispumpe M2
 pump_m3      y 0x4906 uint8   # [PDF] Heizkreispumpe M3
 v_reservoir  y 0x0aa0 uint8   # [PDF] AM1 Ausgang 1 (3-Wege Ventil zu WW Speicher)
 t_reservoir  y 0x0812 degC    # [PDF] Speicher Ladesensor Komfortsensor
+rt_burner_s  y 0x08a7 uint32  # [rb]  burner runtime [sec]
+start_burner y 0x088a uint32  # [rb]  burner number of starts [1]
+
+#
+#           0 1 2 3 4 5 6 7 8 9 a b c d e f
+# 0840/16 = 00000001010000ffffff010000ff9434
+#                 ==##
+#
+# from [kd2] 
+# 0842: Brenner 1. Stufe
+# 0843: Ausgang 20
+# 0844: Ausgang 29
+# 0845: Speicherladepumpe
+# 0846: Zirkulationspumpe
+#
+
+pump_ww_circ y 0x0844 uint8   # guess warmwater circulation
+pump_circ    y 0x0843 uint8   # guess circulation pump
