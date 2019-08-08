@@ -8,6 +8,7 @@ from aiohttp import web
 
 import viessmann_decode
 import vitotronic
+import datetime
 
 log = logging.getLogger('py-viessmann-log')
 
@@ -17,7 +18,7 @@ async def poll_msg(vito_proto, addr, length):
     if vito_proto.request_read(addr, length):
         return None
     for ticks in range(10):
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
 
         if vito_proto.rx_nak_ctr:
             return 'NAK received.'
@@ -107,20 +108,31 @@ class PollMainLoop:
         return influx_fields
 
     async def tick(self):
-        influx_fields = dict()
+        poll_ctr = 0
+        datapoint_storage = list()
 
         while True:
             log.info('=== Poll controller ===')
             influx_fields = await self.perform_regular_query()
-            if influx_fields and self.influx_client:
-                js_body = [{
+            now =  datetime.datetime.now(datetime.timezone.utc)
+            if influx_fields :
+                js_body = {
                     'measurement': self.args.measurement,
+                    'time': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
                     'fields': influx_fields
-                }]
-                try :
-                    self.influx_client.write_points(js_body, database=self.args.influxdb)
-                except Exception as e :
-                    log.error('Error writing to influxdb!', exc_info=True)
+                }
+                datapoint_storage.append(js_body)
+
+            poll_ctr += 1
+
+            if poll_ctr >= 5 :
+                if self.influx_client and datapoint_storage :
+                    try :
+                        self.influx_client.write_points(datapoint_storage, database=self.args.influxdb)
+                    except Exception as e :
+                        log.error('Error writing to influxdb!', exc_info=True)
+                datapoint_storage.clear()
+                poll_ctr = 0
 
             await asyncio.sleep(self.args.sleep)
 
