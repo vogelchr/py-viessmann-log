@@ -8,7 +8,7 @@ Type=simple
 PrivateTmp=true
 ExecStart=/usr/local/sbin/py-viessmann-log.py -q -w 8080 -i heating /usr/local/lib/py-viessmann-log/viessmann_variables.txt
 Restart=no
-User=ow
+User=influxdb
 SupplementaryGroups=uucp
 
 [Install]
