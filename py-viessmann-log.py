@@ -91,7 +91,7 @@ class PollMainLoop:
 
             if type(ret) != tuple:
                 log.error('%s [%04x/%d] error %s while talking to controller',
-                          item.name, item.addr, item.length)
+                          item.name, item.addr, item.length, str(ret))
                 continue
 
             msgtype, method, rx_addr, payload = ret
