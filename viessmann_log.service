@@ -3,10 +3,13 @@ Description=Viessmann Optolink Temperature Logging
 After=influxdb.service
 
 [Service]
-Environment=PYTHONPATH=/usr/local/lib/py-viessmann-log
 Type=simple
 PrivateTmp=true
-ExecStart=/usr/local/sbin/py-viessmann-log.py -q -w 8080 -i heating /usr/local/lib/py-viessmann-log/viessmann_variables.txt
+ExecStart=/usr/local/lib/py-viessmann-log/venv/bin/python \
+	  /usr/local/lib/py-viessmann-log/py-viessmann-log.py \
+	  -T /usr/local/lib/py-viessmann-log/influxdb.token \
+	  -b heating/autogen -t /dev/tty_viessmann -q \
+	  /usr/local/lib/py-viessmann-log/viessmann_variables.txt
 Restart=no
 User=influxdb
 SupplementaryGroups=uucp

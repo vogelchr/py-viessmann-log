@@ -1,13 +1,16 @@
 #!/bin/sh
 
-install -v -m755 -o0 -g0 py-viessmann-log.py /usr/local/sbin
-install -v -m755 -o0 -g0 -d /usr/local/lib/py-viessmann-log
 
-install -v -m644 -o0 -g0 ascii_tbl.py        /usr/local/lib/py-viessmann-log
-install -v -m644 -o0 -g0 viessmann_decode.py /usr/local/lib/py-viessmann-log
-install -v -m644 -o0 -g0 vitotronic.py       /usr/local/lib/py-viessmann-log
-install -v -m644 -o0 -g0 viessmann_variables.txt /usr/local/lib/py-viessmann-log
+libdir=/usr/local/lib/py-viessmann-log
+install -v -m755 -o0 -g0 -d $libdir
 
+virtualenv $libdir/venv
+$libdir/venv/bin/pip install aiohttp pyserial-asyncio influxdb-client
+
+install -v -m644 -o0 -g0 viessmann_variables.txt $libdir
+install -v -m755 -o0 -g0 py-viessmann-log.py $libdir
+install -v -m644 -o0 -g0 ascii_tbl.py viessmann_decode.py vitotronic.py \
+	$libdir/venv/lib/python3.9/site-packages/
 
 if [ -d /etc/systemd/system ] ; then
 	do_reload=0
