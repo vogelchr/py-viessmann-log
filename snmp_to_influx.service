@@ -1,0 +1,18 @@
+[Unit]
+Description=SNMP Temperature Logging
+After=influxdb.service
+
+[Service]
+Environment=
+Type=simple
+PrivateTmp=true
+ExecStart=/usr/local/lib/py-viessmann-log/venv/bin/python \
+            /usr/local/lib/py-viessmann-log/snmp-to-influx.py \
+            -T /usr/local/lib/py-viessmann-log/influxdb.token \
+            /usr/local/lib/py-viessmann-log/snmp_sensors.json
+Restart=no
+User=influxdb
+SupplementaryGroups=uucp
+
+[Install]
+WantedBy=multi-user.target
