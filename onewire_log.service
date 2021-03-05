@@ -1,0 +1,18 @@
+[Unit]
+Description=Onewire Temperature Logging
+After=influxdb.service
+
+[Service]
+Environment=
+Type=simple
+PrivateTmp=true
+ExecStart=/usr/local/lib/py-viessmann-log/venv/bin/python \
+            /usr/local/lib/py-viessmann-log/onewire-log.py \
+            -T /usr/local/lib/py-viessmann-log/influxdb.token \
+            /usr/local/lib/py-viessmann-log/ow_temp_sensors.txt
+Restart=no
+User=influxdb
+SupplementaryGroups=uucp
+
+[Install]
+WantedBy=multi-user.target

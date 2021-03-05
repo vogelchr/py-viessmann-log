@@ -1,0 +1,13 @@
+28-0117c2ad18ff loop_sup
+28-0117c273cfff loop_ret
+
+28-00000a2f8e04 og_sup
+28-00000a302480 og_ret
+
+28-00000a2fad6b ug_sup
+28-00000a2fd351 ug_ret
+
+28-000004aaa763 reservoir
+28-00000a2f2900 loop_mid2
+28-00000a304f2b loop_mid1
+28-00000a2fe158 room
