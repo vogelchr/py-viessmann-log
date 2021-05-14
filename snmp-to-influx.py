@@ -95,9 +95,9 @@ if __name__ == '__main__':
                         metavar='db', type=str, default='heating/autogen')
     parser.add_argument('-m', '--influxdb-measurement', help='Measurement. [def: %(default)s]',
                         metavar='txt', type=str, default='indoors')
-    parser.add_argument('-T', '--influxdb-token-file', help='Token file [def: %(default)s]',
+    parser.add_argument('-T', '--influxdb-token-file', help='Token file',
                         metavar='file', type=Path)
-    parser.add_argument('-s', '--sleep', help='Sleep between collections [def: %(defaults)d]',
+    parser.add_argument('-s', '--sleep', help='Sleep between collections [def: %(default)d]',
                         metavar='SEC', type=int, default=60)
 
     args = parser.parse_args()
