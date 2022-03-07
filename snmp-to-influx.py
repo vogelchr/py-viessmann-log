@@ -107,4 +107,5 @@ if __name__ == '__main__':
     token = args.influxdb_token_file.open().readline().strip()
     clt = influxdb_client.InfluxDBClient(url=args.influxdb_url, token=token)
 
-    asyncio.get_event_loop().run_until_complete(mainloop(cfg, args, clt))
+    event_loop = asyncio.new_event_loop()
+    event_loop.run_until_complete(mainloop(cfg, args, clt))
