@@ -1,4 +1,10 @@
 [
-    { "host": "ca562d0" },
-    { "host": "ca562cc" }
+  {
+    "host": "ca562d0.fritz.box",
+    "tag": "ca562d0"
+  },
+  {
+    "host": "ca562cc.fritz.box",
+    "tag": "ca562cc"
+  }
 ]
