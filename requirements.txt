@@ -1,4 +1,4 @@
 aiohttp
 pyserial-asyncio
 influxdb-client
-pysnmp @ git+https://github.com/vogelchr/pysnmp@vogelchr/fix_py311
+easysnmp

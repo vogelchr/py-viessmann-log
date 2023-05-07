@@ -2,64 +2,39 @@
 import influxdb_client
 import asyncio
 import datetime
-import pysnmp.hlapi as hlapi
-from pysnmp.hlapi.v3arch.asyncio import UdpTransportTarget, getCmd
-from pysnmp.smi.builder import MibBuilder
-from pysnmp.smi.view import MibViewController
 import json
 import argparse
+import easysnmp
 from pathlib import Path
 
-
 async def mainloop(cfg, args, clt):
-
-    snmpengine = hlapi.SnmpEngine()
-    ctx = hlapi.ContextData()
-
-    mibbuilder = MibBuilder()
-    mibctrl = MibViewController(mibbuilder)
+    sessions = dict()
 
     name_oid_list = [
         ('temp', '1.3.6.1.4.1.22626.1.2.1.1.0'),
         ('rh', '1.3.6.1.4.1.22626.1.2.1.2.0'),
     ]
 
-    objid_list = []
-    for name, oid in name_oid_list:
-        objid = hlapi.ObjectIdentity(oid)
-        objid.resolveWithMib(mibctrl)
-        objid_list.append(objid)
-
     while True:
         for sensorcfg in cfg:
             host = sensorcfg['host']
             community = sensorcfg.get('community', 'public')
 
-            # mpModel=0 -> SNMPv1
-            commdata = hlapi.CommunityData(community, mpModel=0)
-
-            try:
-                udptgt = UdpTransportTarget((host, 161))
-            except Exception as exc:
-                print(f'{host}: cannot get address, exception {repr(exc)}.')
+            try :
+                if host not in sessions :
+                    sessions[host] = easysnmp.Session(hostname=host, community=community, version=1)
+            except Exception as exc :
+                print(f'Exception {repr(exc)} trying to create snmp session to {host}!')
                 continue
 
             mmt_values = list()
-            for (name, oid), vb in zip(name_oid_list, objid_list):
-                # for whatever reason, this only works one at a time
-                resp = await getCmd(
-                    snmpengine,  # snmpEngine
-                    commdata,  # authData
-                    udptgt,  # transportTarget
-                    ctx,  # contextData
-                    [vb]  # varBinds
-                )
-                errorIndication, errorStatus, errorIndex, varBinds = resp
-
-                if errorIndication is not None or errorStatus:
+            for name, oid in name_oid_list:
+                try :
+                    resp = sessions[host].get(oid)
+                    mmt_values.append((name, float(resp.value)))
+                except Exception as exc :
+                    print(f'Exception {repr(exc)} trying to get {name} from {host}!')
                     continue
-
-                mmt_values.append((name, float(varBinds[0][1])))
 
             if mmt_values:
                 # one measurement
