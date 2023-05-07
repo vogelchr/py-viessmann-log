@@ -2,10 +2,10 @@
 import influxdb_client
 import asyncio
 import datetime
-import pysnmp.hlapi.v3arch as hlapi
-import pysnmp.hlapi.v3arch.asyncio as hlapi_asyncio
-import pysnmp.smi
-import sys
+import pysnmp.hlapi as hlapi
+from pysnmp.hlapi.v3arch.asyncio import UdpTransportTarget, getCmd
+from pysnmp.smi.builder import MibBuilder
+from pysnmp.smi.view import MibViewController
 import json
 import argparse
 from pathlib import Path
@@ -16,8 +16,8 @@ async def mainloop(cfg, args, clt):
     snmpengine = hlapi.SnmpEngine()
     ctx = hlapi.ContextData()
 
-    mibbuilder = pysnmp.smi.builder.MibBuilder()
-    mibctrl = pysnmp.smi.view.MibViewController(mibbuilder)
+    mibbuilder = MibBuilder()
+    mibctrl = MibViewController(mibbuilder)
 
     name_oid_list = [
         ('temp', '1.3.6.1.4.1.22626.1.2.1.1.0'),
@@ -39,7 +39,7 @@ async def mainloop(cfg, args, clt):
             commdata = hlapi.CommunityData(community, mpModel=0)
 
             try:
-                udptgt = hlapi_asyncio.UdpTransportTarget((host, 161))
+                udptgt = UdpTransportTarget((host, 161))
             except Exception as exc:
                 print(f'{host}: cannot get address, exception {repr(exc)}.')
                 continue
@@ -47,7 +47,7 @@ async def mainloop(cfg, args, clt):
             mmt_values = list()
             for (name, oid), vb in zip(name_oid_list, objid_list):
                 # for whatever reason, this only works one at a time
-                resp = await hlapi_asyncio.getCmd(
+                resp = await getCmd(
                     snmpengine,  # snmpEngine
                     commdata,  # authData
                     udptgt,  # transportTarget
