@@ -7,7 +7,7 @@ libdir=/usr/local/lib/py-viessmann-log
 install -v -m755 -o0 -g0 -d $libdir
 
 virtualenv $libdir/venv
-$libdir/venv/bin/pip install aiohttp pyserial-asyncio influxdb-client pysnmp
+$libdir/venv/bin/pip install -r requirements.txt
 
 install -v -m644 -o0 -g0 snmp_sensors.json $libdir
 install -v -m755 -o0 -g0 snmp-to-influx.py $libdir
