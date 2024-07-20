@@ -195,7 +195,7 @@ of the allowed data types (e.g. degC, uint8, ...) or number of bytes to read.
 
     logging.basicConfig(level=lvl, format='%(asctime)-15s %(message)s')
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
 
     ###
     # read list of measurements
