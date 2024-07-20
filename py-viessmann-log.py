@@ -102,7 +102,8 @@ class PollMainLoop:
             try:
                 v = item.decoder(payload)
             except Exception as e:
-                log.error('%-12s ERR, raw=%s, exception=%s', item.name, vitotronic.hexlify(payload), e)
+                log.error('%-12s ERR, raw=%s, exception=%s',
+                          item.name, vitotronic.hexlify(payload), e)
 
             log.info('%-12s ' + item.format, item.name, v)
 
@@ -118,25 +119,26 @@ class PollMainLoop:
             log.info('=== Poll controller ===')
             influx_fields = await self.perform_regular_query()
 
-
-            if influx_fields :
+            if influx_fields:
                 js_body = {
                     'measurement': self.args.influxdb_measurement,
                     'time': datetime.datetime.now(datetime.UTC),
                     'fields': influx_fields
                 }
-                pt = influxdb_client.Point.from_dict(js_body, influxdb_client.WritePrecision.NS)
+                pt = influxdb_client.Point.from_dict(
+                    js_body, influxdb_client.WritePrecision.NS)
                 datapoint_storage.append(pt)
 
             poll_ctr += 1
 
-            if poll_ctr >= self.args.batch_submit :
-                if self.influx_client and datapoint_storage :
-                    try :
+            if poll_ctr >= self.args.batch_submit:
+                if self.influx_client and datapoint_storage:
+                    try:
                         wr_opts = influxdb_client.client.write_api.SYNCHRONOUS
                         write_api = self.influx_client.write_api(wr_opts)
-                        write_api.write(self.args.influxdb_bucket, self.args.influxdb_org, datapoint_storage)
-                    except Exception as e :
+                        write_api.write(self.args.influxdb_bucket,
+                                        self.args.influxdb_org, datapoint_storage)
+                    except Exception as e:
                         log.error('Error writing to influxdb!', exc_info=True)
                 datapoint_storage.clear()
                 poll_ctr = 0
@@ -151,8 +153,10 @@ def main():
     # parse command-line arguments
     ###
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--debug', help='Debug mode.', action='store_true')
-    parser.add_argument('-q', '--quiet', help='Quiet mode, less output.', action='store_true')
+    parser.add_argument('-d', '--debug', help='Debug mode.',
+                        action='store_true')
+    parser.add_argument(
+        '-q', '--quiet', help='Quiet mode, less output.', action='store_true')
 
     parser.add_argument('-t', '--tty', metavar='DEV', default='/dev/ttyUSB0',
                         help='Serial port, [def: /dev/ttyUSB0]', )
@@ -163,22 +167,22 @@ def main():
                         help='Only submit in batches of N to database. [def: %(default)d]')
 
     parser.add_argument('-w', '--webserver', metavar='PORT', default=None, type=int,
-                     help='''Run webserver to submit queries on
+                        help='''Run webserver to submit queries on
 http://localhost:PORT/query/address/length_or_tag where length may be one
 of the allowed data types (e.g. degC, uint8, ...) or number of bytes to read.
 [def: off]''')
 
     grp = parser.add_argument_group('InfluxDB Related')
     grp.add_argument('-i', '--influxdb-url', metavar='URL', type=str,
-                    default='http://127.0.0.1:8086/',
+                     default='http://127.0.0.1:8086/',
                      help='Influxdb database url use [def: %(default)s]')
     grp.add_argument('-T', '--influxdb-token-file', metavar='FILE', type=Path,
-                    default='/usr/local/lib/py-viessmann-log/influxdb.token',
-                    help='Path with influxdb token (1 line). [def: %(default)s]')
+                     default='/usr/local/lib/py-viessmann-log/influxdb.token',
+                     help='Path with influxdb token (1 line). [def: %(default)s]')
     grp.add_argument('-o', '--influxdb-org', metavar='org', type=str, default='vogel.cx',
-                    help='Influxdb org. [def: %(default)s]')
+                     help='Influxdb org. [def: %(default)s]')
     grp.add_argument('-b', '--influxdb-bucket', metavar='bucket', default='heating',
-                    type=str, help='Influxdb bucket [def: %(default)s]')
+                     type=str, help='Influxdb bucket [def: %(default)s]')
     grp.add_argument('-m', '--influxdb-measurement', metavar='MEASNAME', default='optolink',
                      help='Influxdb measurement name to use [def: optolink]')
 
@@ -218,19 +222,21 @@ of the allowed data types (e.g. degC, uint8, ...) or number of bytes to read.
     influx_client = None
     if args.influxdb_url and args.influxdb_url != '-':
         token = args.influxdb_token_file.open().readline().strip()
-        influx_client = influxdb_client.InfluxDBClient(url=args.influxdb_url, token=token)
+        influx_client = influxdb_client.InfluxDBClient(
+            url=args.influxdb_url, token=token)
 
     poll_mainloop = PollMainLoop(vito_proto, influx_client, variablelist, args)
     loop.create_task(poll_mainloop.tick())
 
-    if args.webserver :
+    if args.webserver:
         webapp = web.Application()
         webapp.add_routes([
-            web.get('/query/{addr}/{tag_or_len}', poll_mainloop.handle_web_query),
+            web.get('/query/{addr}/{tag_or_len}',
+                    poll_mainloop.handle_web_query),
         ])
 
         web.run_app(webapp, port=args.webserver)  # includes loop.run_forever()
-    else :
+    else:
         loop.run_forever()
 
 

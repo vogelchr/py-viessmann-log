@@ -53,7 +53,8 @@ class PrefixLoggerAdapter(logging.LoggerAdapter):
 class VitoTronicProtocol(asyncio.Protocol):
     def __init__(self):
         _log = logging.getLogger(self.__class__.__name__)
-        self.log = PrefixLoggerAdapter(_log, {'prefix': self.__class__.__name__})
+        self.log = PrefixLoggerAdapter(
+            _log, {'prefix': self.__class__.__name__})
         self.transport = None
 
         self.rx_state = self._rx_state_start
@@ -72,7 +73,7 @@ class VitoTronicProtocol(asyncio.Protocol):
     ###
 
     def _rx_state_start(self, c):
-        pass # dummy
+        pass  # dummy
 
     def _rx_state_unsync(self, c):
         if c == NAK_i:
@@ -172,14 +173,14 @@ class VitoTronicProtocol(asyncio.Protocol):
         self.transport.write(EOT)
 
     def connection_lost(self, exc):
-        pass # should not happen with serial port
+        pass  # should not happen with serial port
 
     def data_received(self, data):
         # upon start, we might have a lot of junk in the
         # stale RX buffer of the serial interface
-        if self.rx_state == self._rx_state_start :
+        if self.rx_state == self._rx_state_start:
             self.rx_state = self._rx_state_unsync
-            if len(data) > 1 :
+            if len(data) > 1:
                 return
 
         for d in data:
@@ -203,8 +204,9 @@ class VitoTronicProtocol(asyncio.Protocol):
                     self.rx_timeout = 0
                 continue
 
-            if self.rx_timeout >= 8: # 4 sec
-                self.log.error('RX Timeout in state %s.', self.rx_state.__name__)
+            if self.rx_timeout >= 8:  # 4 sec
+                self.log.error('RX Timeout in state %s.',
+                               self.rx_state.__name__)
                 self.rx_to_ctr += 1
                 self.rx_state = self._rx_state_unsync
                 self.transport.write(EOT)
@@ -224,12 +226,14 @@ class VitoTronicProtocol(asyncio.Protocol):
     def request_read(self, addr, exp_len):
         if self.rx_state != self._rx_state_sync:
             if self.rx_state:
-                self.log.error('request_read() in state %s', self.rx_state.__name__)
+                self.log.error('request_read() in state %s',
+                               self.rx_state.__name__)
             else:
                 self.log.error('request_read() during startup!')
             return True
 
-        self.log.debug('Requesting data at address 0x%04x, len %d.', addr, exp_len)
+        self.log.debug(
+            'Requesting data at address 0x%04x, len %d.', addr, exp_len)
         msg = bytearray(8)
         msg[0] = 0x41
         msg[1] = 5  # length of telegram (up to, not including checksum)

@@ -7,6 +7,7 @@ import argparse
 import easysnmp
 from pathlib import Path
 
+
 async def mainloop(cfg, args, clt):
     sessions = dict()
 
@@ -20,20 +21,23 @@ async def mainloop(cfg, args, clt):
             host = sensorcfg['host']
             community = sensorcfg.get('community', 'public')
 
-            try :
-                if host not in sessions :
-                    sessions[host] = easysnmp.Session(hostname=host, community=community, version=1)
-            except Exception as exc :
-                print(f'Exception {repr(exc)} trying to create snmp session to {host}!')
+            try:
+                if host not in sessions:
+                    sessions[host] = easysnmp.Session(
+                        hostname=host, community=community, version=1)
+            except Exception as exc:
+                print(
+                    f'Exception {repr(exc)} trying to create snmp session to {host}!')
                 continue
 
             mmt_values = list()
             for name, oid in name_oid_list:
-                try :
+                try:
                     resp = sessions[host].get(oid)
                     mmt_values.append((name, float(resp.value)))
-                except Exception as exc :
-                    print(f'Exception {repr(exc)} trying to get {name} from {host}!')
+                except Exception as exc:
+                    print(
+                        f'Exception {repr(exc)} trying to get {name} from {host}!')
                     continue
 
             if mmt_values:

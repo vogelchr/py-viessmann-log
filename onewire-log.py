@@ -64,7 +64,8 @@ args = parser.parse_args()
 sensors = read_sensor_list(args.sensors)
 
 token = args.influxdb_token_file.open().readline().strip()
-influx_client = influxdb_client.InfluxDBClient(url=args.influxdb_url, token=token)
+influx_client = influxdb_client.InfluxDBClient(
+    url=args.influxdb_url, token=token)
 
 datapoints = list()
 poll_ctr = 0
@@ -121,7 +122,8 @@ while True:
             'time': datetime.datetime.utcnow(),
             'fields': influx_fields
         }
-        datapoints.append(influxdb_client.Point.from_dict(js_body, influxdb_client.WritePrecision.NS))
+        datapoints.append(influxdb_client.Point.from_dict(
+            js_body, influxdb_client.WritePrecision.NS))
     else:
         print(f'Not a single sensor had data???')
         sys.stdout.flush()
@@ -130,7 +132,8 @@ while True:
         try:
             wr_opts = influxdb_client.client.write_api.SYNCHRONOUS
             write_api = influx_client.write_api(wr_opts)
-            ret = write_api.write(args.influxdb_bucket, args.influxdb_org, datapoints)
+            ret = write_api.write(args.influxdb_bucket,
+                                  args.influxdb_org, datapoints)
             datapoints.clear()
         except Exception as e:
             print(f'Exception occured writing points to influxdb.')

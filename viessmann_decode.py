@@ -27,7 +27,7 @@ def decode_systime_to_tuple(payload):
     tm_yday = 0
     tm_isdst = 0
     return tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec, tm_wday, \
-           tm_yday, tm_isdst
+        tm_yday, tm_isdst
 
 
 def decode_systime_to_str(payload):
@@ -67,7 +67,7 @@ def gen_decoder(tag_or_length):
         # corresponding to the number of bytes to read, and we
         # just return a hex presentation
         length = int(tag_or_length, 0)
-        fct_or_struct = lambda v: binascii.hexlify(v).decode('ascii')
+        def fct_or_struct(v): return binascii.hexlify(v).decode('ascii')
         len_or_factor = length
         fmt = f'%{2*length}s'
     else:
@@ -110,7 +110,8 @@ def load_variable_list(fn):
 
             arr = line.strip().split()
             if len(arr) < 4:
-                raise RuntimeError('%s:%d not enough columns, need at least 4' % (fn, lno))
+                raise RuntimeError(
+                    '%s:%d not enough columns, need at least 4' % (fn, lno))
 
             ###
             # parse columns
