@@ -122,7 +122,7 @@ class PollMainLoop:
             if influx_fields :
                 js_body = {
                     'measurement': self.args.influxdb_measurement,
-                    'time': datetime.datetime.utcnow(),
+                    'time': datetime.datetime.now(datetime.UTC),
                     'fields': influx_fields
                 }
                 pt = influxdb_client.Point.from_dict(js_body, influxdb_client.WritePrecision.NS)
