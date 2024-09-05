@@ -46,6 +46,7 @@ class PollMainLoop:
         self.influx_client = influx_client
         self.varlist = varlist
         self.args = args
+        self.recent_data = None
 
         self.vito_lock = asyncio.Lock()
 
@@ -81,6 +82,11 @@ class PollMainLoop:
             return web.Response(status=500, text='Exception while formatting result.')
 
         return web.Response(status=200, text=text)
+
+    async def handle_sensor_query(self, request):
+        if self.recent_data is None:
+            return web.Response(status=500, text='No data received, yet.')
+        return web.json_response(self.recent_data)
 
     async def perform_regular_query(self):
         influx_fields = dict()
@@ -128,6 +134,9 @@ class PollMainLoop:
                 pt = influxdb_client.Point.from_dict(
                     js_body, influxdb_client.WritePrecision.NS)
                 datapoint_storage.append(pt)
+
+            influx_fields['timestamp'] = datetime.datetime.now().isoformat()
+            self.recent_data = influx_fields
 
             poll_ctr += 1
 
@@ -229,15 +238,24 @@ of the allowed data types (e.g. degC, uint8, ...) or number of bytes to read.
     loop.create_task(poll_mainloop.tick())
 
     if args.webserver:
+        log.info(f'Configure webserver on port {args.webserver}.')
         webapp = web.Application()
         webapp.add_routes([
             web.get('/query/{addr}/{tag_or_len}',
                     poll_mainloop.handle_web_query),
+            web.get('/sensor', poll_mainloop.handle_sensor_query)
         ])
 
-        web.run_app(webapp, port=args.webserver)  # includes loop.run_forever()
-    else:
-        loop.run_forever()
+        log.info(f' ...run setup')
+        runner = web.AppRunner(webapp)
+        loop.run_until_complete(runner.setup())
+
+        log.info(f' ...configure site')
+        site = web.TCPSite(runner, None, args.webserver)
+        loop.run_until_complete(site.start())
+
+    log.info(f'Entering main loop.')
+    loop.run_forever()
 
 
 if __name__ == '__main__':

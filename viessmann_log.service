@@ -9,6 +9,7 @@ ExecStart=/usr/local/lib/py-viessmann-log/venv/bin/python \
 	  /usr/local/lib/py-viessmann-log/py-viessmann-log.py \
 	  -T /usr/local/lib/py-viessmann-log/influxdb.token \
 	  -b heating/autogen -t /dev/tty_viessmann -q \
+	  -w 22247 \
 	  /usr/local/lib/py-viessmann-log/viessmann_variables.txt
 Restart=no
 User=influxdb
