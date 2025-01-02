@@ -18,7 +18,7 @@ install -v -m755 -o0 -g0 onewire-log.py $libdir
 install -v -m644 -o0 -g0 viessmann_variables.txt $libdir
 install -v -m755 -o0 -g0 py-viessmann-log.py $libdir
 install -v -m644 -o0 -g0 ascii_tbl.py viessmann_decode.py vitotronic.py \
-	$libdir/venv/lib/python3.12/site-packages/
+	$libdir/venv/lib/python3.*/site-packages/
 
 if [ -d /etc/systemd/system ] ; then
 	do_reload=0
