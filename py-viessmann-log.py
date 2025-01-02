@@ -46,7 +46,7 @@ class PollMainLoop:
         self.influx_client = influx_client
         self.varlist = varlist
         self.args = args
-        self.recent_data = None
+        self.recent_data = dict()
 
         self.vito_lock = asyncio.Lock()
 
@@ -84,8 +84,6 @@ class PollMainLoop:
         return web.Response(status=200, text=text)
 
     async def handle_sensor_query(self, request):
-        if self.recent_data is None:
-            return web.Response(status=500, text='No data received, yet.')
         return web.json_response(self.recent_data)
 
     async def perform_regular_query(self):
@@ -113,6 +111,9 @@ class PollMainLoop:
 
             log.info('%-12s ' + item.format, item.name, v)
 
+            now = datetime.datetime.now().astimezone()
+            self.recent_data[item.name] = [v, now.isoformat()]
+
             if item.to_influxdb:
                 influx_fields[item.name] = v
         return influx_fields
@@ -136,7 +137,6 @@ class PollMainLoop:
                 datapoint_storage.append(pt)
 
             influx_fields['timestamp'] = datetime.datetime.now().isoformat()
-            self.recent_data = influx_fields
 
             poll_ctr += 1
 
